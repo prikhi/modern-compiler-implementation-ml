@@ -1,4 +1,7 @@
-Library (structure Parse) is
+Library
+    structure Main
+    structure Parse
+is
 
     absyn.sml
     errormsg.sml
@@ -9,6 +12,10 @@ Library (structure Parse) is
     prabsyn.sml
     tiger.lex
     tiger.grm
+    types.sml
+    env.sml
+    semant.sml
+    main.sml
 
     $/basis.cm
     $/smlnj-lib.cm
