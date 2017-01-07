@@ -106,7 +106,7 @@ exp : ID                                                            (A.VarExp (A
     | MINUS exp %prec UMINUS                                        (A.OpExp {left = A.IntExp 0, oper = A.MinusOp, right = exp, pos = MINUSright})
     | INT                                                           (A.IntExp INT)
     | STRING                                                        (A.StringExp (STRING, STRINGright))
-    | LPAREN RPAREN                                                 (A.NilExp)
+    | LPAREN RPAREN                                                 (A.SeqExp [])
     | recordexp                                                     (recordexp)
     | exp PLUS exp                                                  (A.OpExp {left = exp1, oper = A.PlusOp, right = exp2, pos = PLUSleft})
     | exp MINUS exp                                                 (A.OpExp {left = exp1, oper = A.MinusOp, right = exp2, pos = MINUSleft})
@@ -131,7 +131,8 @@ exp : ID                                                            (A.VarExp (A
     | BREAK                                                         (A.BreakExp BREAKright)
     | LPAREN exp RPAREN                                             (exp)
     | exp SEMICOLON exp                                             (case exp2 of
-                                                                        A.SeqExp exps => A.SeqExp ((exp1, exp1right) :: exps)
+                                                                        A.SeqExp [] => A.SeqExp ((exp1, exp1right) :: [ (A.SeqExp [], exp2left) ])
+                                                                      | A.SeqExp exps => A.SeqExp ((exp1, exp1right) :: exps)
                                                                       | _ => A.SeqExp [ (exp1, exp1right), (exp2, exp2right) ]
                                                                     )
 
