@@ -1,6 +1,8 @@
 Library
     structure Main
     structure Parse
+    structure PentiumFrame
+    structure Translate
 is
 
     absyn.sml
@@ -15,6 +17,11 @@ is
     types.sml
     env.sml
     semant.sml
+    temp.sig
+    temp.sml
+    frame.sig
+    pentiumframe.sml
+    translate.sml
     main.sml
 
     $/basis.cm

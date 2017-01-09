@@ -1,17 +1,13 @@
-structure Translate = struct
-  type exp = unit
-end
-
 structure Semant : sig
   type venv
   type tenv
   type expty
 
   val transProg : Absyn.exp -> unit
-  val transExp : venv * tenv -> Absyn.exp -> expty
-  val transDec : venv * tenv -> Absyn.dec -> {venv: venv, tenv: tenv}
+  val transExp : venv * tenv * Translate.level -> Absyn.exp -> expty
+  val transDec : venv * tenv * Translate.level -> Absyn.dec -> {venv: venv, tenv: tenv}
   val transTy : tenv * { name : Absyn.symbol, ty : Absyn.ty, pos : Absyn.pos } -> Types.ty
-  val transFun : venv * tenv * Absyn.fundec -> Env.enventry option
+  val transFun : venv * tenv * Translate.level * Absyn.fundec -> unit
 end = struct
   (* Aliases *)
   structure A = Absyn
@@ -106,21 +102,41 @@ end = struct
 
 
   (* Translators *)
-  fun transDec (venv, tenv) =
+  fun transDec (venv, tenv, level) =
     (* Typecheck an Absyn.dec *)
     let
       fun trdec (A.VarDec { name, escape, typ = NONE, init, pos }) =
             let
-              val { exp, ty } = transExp (venv, tenv) init
+              val { exp, ty } = transExp (venv, tenv, level) init
             in
-              { venv = Symbol.enter (venv, name, Env.VarEntry { ty = ty }), tenv = tenv }
+              { venv =
+                  Symbol.enter
+                    ( venv
+                    , name
+                    , Env.VarEntry
+                      { ty = ty
+                      , access = Translate.allocLocal level (!escape)
+                      }
+                    )
+              , tenv = tenv
+              }
             end
         | trdec (A.VarDec { name, escape, typ = SOME (tySym, _), init, pos }) =
             (case Symbol.look (tenv, tySym) of
                NONE =>
                  (error pos "undefined type"; { venv = venv, tenv = tenv })
              | SOME ty =>
-                 { venv = Symbol.enter (venv, name, Env.VarEntry { ty = ty }), tenv = tenv }
+                 { venv =
+                    Symbol.enter
+                      ( venv
+                      , name
+                      , Env.VarEntry
+                        { ty = ty
+                        , access = Translate.allocLocal level (!escape)
+                        }
+                      )
+                 , tenv = tenv
+                 }
             )
 
         | trdec (A.TypeDec decs) =
@@ -141,10 +157,18 @@ end = struct
             let
               val venv' =
                 List.foldr
-                  (fn (dec, env) => Symbol.enter (env, #name dec, functionHeader (tenv, dec)))
+                  (fn (dec, env) => Symbol.enter (env, #name dec, functionHeader (tenv, level, dec)))
                   venv decs
+              fun runDec dec =
+                case Symbol.look (venv', #name dec) of
+                  NONE =>
+                    ErrorMsg.impossible "Semantic Analysis did not find function header"
+                | SOME (Env.FunEntry { level, ... }) =>
+                    transFun (venv', tenv, level, dec)
+                | _ =>
+                    ErrorMsg.impossible "Semantic Analysis found variable instead of function header"
             in
-              List.map (fn dec => transFun (venv', tenv, dec));
+              List.map runDec decs;
               { tenv = tenv
               , venv = venv'
               }
@@ -171,57 +195,88 @@ end = struct
              (error symPos "undefined type"; T.NIL)
          | SOME ty =>
              T.ARRAY (ty, ref ()))
-  and functionHeader (tenv, { name, params, result, body, pos}) =
+  and functionHeader (tenv, level, { name, params, result, body, pos }) =
     (* Return a Function's Type Heading *)
     let
       val params' =
         List.map #ty
           (List.map (transParam tenv) params)
+      val level' =
+        Translate.newLevel
+          { parent = level
+          , name = (Temp.newlabel ())
+          , formals = List.map (fn p => !(#escape p)) params
+          }
+      val label =
+        Temp.newlabel ()
     in
       (case result of
          SOME (sym, pos) =>
            (case Symbol.look (tenv, sym) of
               NONE =>
                 (error pos "undefined type";
-                 Env.FunEntry { formals = params', result = T.UNIT })
+                 Env.FunEntry
+                  { formals = params'
+                  , result = T.UNIT
+                  , level = level'
+                  , label = label
+                  })
             | SOME resTy =>
-                Env.FunEntry { formals = params', result = resTy }
+                Env.FunEntry
+                  { formals = params'
+                  , result = resTy
+                  , level = level'
+                  , label = label
+                  }
            )
        | NONE =>
-           Env.FunEntry { formals = params', result = T.UNIT }
+           Env.FunEntry
+            { formals = params'
+            , result = T.UNIT
+            , level = level'
+            , label = label
+            }
       )
     end
-  and transFun (venv, tenv, { name, params, result = SOME (result, resultPos), body, pos }) =
+  and transFun (venv, tenv, level, { name, params, result = SOME (result, resultPos), body, pos }) =
         (case Symbol.look (tenv, result) of
            NONE =>
-             (error resultPos "result type is undefined"; NONE)
+             (error resultPos "result type is undefined")
          | SOME resultTy =>
              let
                val params' =
-                  List.map (transParam tenv) params
-               val entry =
-                 Env.FunEntry { formals = List.map #ty params', result = resultTy }
-               val venv' =
-                 Symbol.enter (venv, name, entry)
+                 List.map (transParam tenv) params
                fun addparam ({ name, ty }, env) =
-                  Symbol.enter (env, name, Env.VarEntry { ty = ty })
-               val (expResult as { exp, ty }) =
-                 transExp (List.foldr addparam venv' params', tenv) body
+                 Symbol.enter
+                  ( env
+                  , name
+                  , Env.VarEntry
+                    { ty = ty
+                    , access = Translate.allocLocal level true
+                    }
+                  )
+               val expResult =
+                 transExp (List.foldr addparam venv params', tenv, level) body
              in
-               checkSame ({ exp = (), ty = resultTy }, expResult, pos);
-               SOME entry
+               checkSame ({ exp = (), ty = resultTy }, expResult, pos)
              end
         )
-    | transFun (venv, tenv, { name, params, result = NONE, body, pos }) =
+    | transFun (venv, tenv, level, { name, params, result = NONE, body, pos }) =
         let
-          val params' = List.map (transParam tenv) params
+          val params' =
+            List.map (transParam tenv) params
           fun addparam ({ name, ty }, env) =
-            Symbol.enter (env, name, Env.VarEntry { ty = ty })
-          val entry = Env.FunEntry { formals = List.map #ty params', result = T.UNIT }
-          val venv' = Symbol.enter (venv, name, entry )
+            Symbol.enter
+              ( env
+              , name
+              , Env.VarEntry
+                { ty = ty
+                , access = Translate.allocLocal level true
+                }
+              )
         in
-          transExp (List.foldr addparam venv' params', tenv) body;
-          SOME entry
+          transExp (List.foldr addparam venv params', tenv, level) body;
+          ()
         end
   and transParam tenv { name, escape, typ = typSym, pos } =
         (* Typecheck a Function Parameter Declaration *)
@@ -230,7 +285,7 @@ end = struct
             (error pos "undefined paramter type"; { name = name, ty = T.NIL })
         | SOME ty =>
             { name = name, ty = ty }
-  and transExp (venv, tenv) =
+  and transExp (venv, tenv, level) =
     (* Typecheck an Absyn.exp *)
     let
       fun trexp (A.IntExp i) =
@@ -247,7 +302,7 @@ end = struct
             (case Symbol.look (venv, func) of
                NONE =>
                  (error pos "undefined function"; { exp = (), ty = T.NIL })
-             | SOME (Env.FunEntry { formals, result }) =>
+             | SOME (Env.FunEntry { formals, result, label, level }) =>
                 (ListPair.map
                   (fn (exp, frm) =>
                     (checkSame ({ exp = (), ty = frm }, trexp exp, pos)))
@@ -311,11 +366,19 @@ end = struct
               { exp = (), ty = T.UNIT })
         | trexp (A.ForExp { var, lo, hi, body, pos, escape }) =
             let
-              val venv' = Symbol.enter (venv, var, Env.VarEntry { ty = T.INT })
+              val venv' =
+                Symbol.enter
+                  ( venv
+                  , var
+                  , Env.VarEntry
+                    { ty = T.INT
+                    , access = Translate.allocLocal level true
+                    }
+                  )
             in
               (checkInt (trexp lo, pos); checkInt (trexp hi, pos);
                loopNesting := !loopNesting + 1;
-               checkSame ({ exp = (), ty = T.UNIT }, transExp (venv', tenv) body, pos);
+               checkSame ({ exp = (), ty = T.UNIT }, transExp (venv', tenv, level) body, pos);
                loopNesting := !loopNesting - 1;
                { exp = (), ty = T.UNIT }
               )
@@ -340,10 +403,10 @@ end = struct
         | trexp (A.LetExp { decs, body, pos }) =
             let
               val { venv = venv', tenv = tenv' } =
-                List.foldl (fn (dec, { venv, tenv }) => transDec (venv, tenv) dec)
+                List.foldl (fn (dec, { venv, tenv }) => transDec (venv, tenv, level) dec)
                   { venv = venv, tenv = tenv } decs
 
-                val bodyExp = transExp (venv', tenv') body
+                val bodyExp = transExp (venv', tenv', level) body
             in
               { exp = (), ty = #ty bodyExp }
             end
@@ -389,7 +452,7 @@ end = struct
                NONE =>
                 (error pos ("undefined variable `" ^ Symbol.name id ^ "`" );
                   { exp = (), ty = T.INT })
-             | SOME (Env.VarEntry { ty }) =>
+             | SOME (Env.VarEntry { ty, access }) =>
                 { exp = (), ty = actual_ty ty }
              | SOME _ =>
                 (error pos "expecting a variable, not a function";
@@ -437,7 +500,17 @@ end = struct
 
   (* Typecheck an Entire Program *)
   fun transProg exp = let
-    val result = transExp (Env.base_venv, Env.base_tenv) exp
+    val result =
+      transExp
+        ( Env.base_venv
+        , Env.base_tenv
+        , Translate.newLevel
+          { parent = Translate.outermost
+          , name = Temp.newlabel ()
+          , formals = []
+          }
+        )
+        exp
   in () end
 
 end
