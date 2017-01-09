@@ -6,22 +6,24 @@ Library
 is
 
     absyn.sml
+    env.sml
     errormsg.sml
-    table.sig
-    table.sml
-    symbol.sml
     parse.sml
     prabsyn.sml
-    tiger.lex
-    tiger.grm
-    types.sml
-    env.sml
-    semant.sml
+    symbol.sml
+    table.sig
+    table.sml
     temp.sig
     temp.sml
+    types.sml
+
     frame.sig
     pentiumframe.sml
+    semant.sml
+    tiger.grm
+    tiger.lex
     translate.sml
+
     main.sml
 
     $/basis.cm
