@@ -3,7 +3,12 @@ structure Main : sig
   val test : unit -> unit list
 end = struct
   fun main filename =
-    Semant.transProg (Parse.parse filename)
+    let
+      val syntaxTree = Parse.parse filename
+    in
+      FindEscape.findEscape syntaxTree;
+      Semant.transProg syntaxTree
+    end
 
   fun test _ =
       let val testDir = OS.FileSys.openDir "../book-code/testcases/"
@@ -11,6 +16,6 @@ end = struct
                                       NONE => acc
                                     | SOME x => getFiles (x::acc))
           fun finalName file = "../book-code/testcases/" ^ file
-      in map (Semant.transProg o Parse.parse o finalName) (getFiles []) end
+      in map (main o finalName) (getFiles []) end
 
 end

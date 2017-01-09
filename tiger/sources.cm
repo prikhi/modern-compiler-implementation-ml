@@ -17,6 +17,7 @@ is
     temp.sml
     types.sml
 
+    findescape.sml
     frame.sig
     pentiumframe.sml
     semant.sml

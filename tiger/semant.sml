@@ -246,13 +246,13 @@ end = struct
              let
                val params' =
                  List.map (transParam tenv) params
-               fun addparam ({ name, ty }, env) =
+               fun addparam ({ name, ty, escape }, env) =
                  Symbol.enter
                   ( env
                   , name
                   , Env.VarEntry
                     { ty = ty
-                    , access = Translate.allocLocal level true
+                    , access = Translate.allocLocal level (!escape)
                     }
                   )
                val expResult =
@@ -265,13 +265,13 @@ end = struct
         let
           val params' =
             List.map (transParam tenv) params
-          fun addparam ({ name, ty }, env) =
+          fun addparam ({ name, ty, escape }, env) =
             Symbol.enter
               ( env
               , name
               , Env.VarEntry
                 { ty = ty
-                , access = Translate.allocLocal level true
+                , access = Translate.allocLocal level (!escape)
                 }
               )
         in
@@ -282,9 +282,9 @@ end = struct
         (* Typecheck a Function Parameter Declaration *)
         case Symbol.look (tenv, typSym) of
           NONE =>
-            (error pos "undefined paramter type"; { name = name, ty = T.NIL })
+            (error pos "undefined paramter type"; { name = name, ty = T.NIL, escape = escape })
         | SOME ty =>
-            { name = name, ty = ty }
+            { name = name, ty = ty, escape = escape }
   and transExp (venv, tenv, level) =
     (* Typecheck an Absyn.exp *)
     let
@@ -372,7 +372,7 @@ end = struct
                   , var
                   , Env.VarEntry
                     { ty = T.INT
-                    , access = Translate.allocLocal level true
+                    , access = Translate.allocLocal level (!escape)
                     }
                   )
             in
