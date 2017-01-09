@@ -23,22 +23,30 @@ end = struct
   type tenv = T.ty Symbol.table
   type expty = { exp: Translate.exp, ty: T.ty }
 
+  (* Break Checking *)
+  val loopNesting = ref 0
+
+
   (* Type Checkers *)
+  (* Ensure the result is an integer *)
   fun checkInt ({ exp, ty }, pos) =
     if ty = T.INT then
       ()
     else
       (error pos "expected an integer")
 
+  (* Ensure the resut is a string *)
   fun checkString ({ exp, ty }, pos) =
     if ty = T.STRING then
       ()
     else
       (error pos "expected a string")
 
+  (* Ensure the results are both integers *)
   fun checkBothInt (result1, result2, pos) =
     (checkInt (result1, pos); checkInt (result2, pos))
 
+  (* Ensure the results are either both an integer or both a string *)
   fun checkBothIntOrString (result1, result2, pos) =
     case (result1, result2) of
       ({ exp, ty = T.INT }, { exp = _, ty = T.INT }) =>
@@ -52,6 +60,7 @@ end = struct
     | _ =>
         (error pos "expecting an integer or string")
 
+  (* Ensure both results can be compared by equality *)
   fun checkBothEq (result1, result2, pos) =
     case (result1, result2) of
       ({ exp, ty = T.INT }, _) =>
@@ -79,6 +88,7 @@ end = struct
     | _ =>
         (error pos "expecting an integer, string, array, or record")
 
+  (* Ensure the results have the same type *)
   fun checkSame (result1, result2, pos) =
     case (result1, result2) of
       ({ exp = _, ty = T.NIL }, { exp = _, ty = T.NIL }) =>
@@ -97,6 +107,7 @@ end = struct
 
   (* Translators *)
   fun transDec (venv, tenv) =
+    (* Typecheck an Absyn.dec *)
     let
       fun trdec (A.VarDec { name, escape, typ = NONE, init, pos }) =
             let
@@ -161,6 +172,7 @@ end = struct
          | SOME ty =>
              T.ARRAY (ty, ref ()))
   and functionHeader (tenv, { name, params, result, body, pos}) =
+    (* Return a Function's Type Heading *)
     let
       val params' =
         List.map #ty
@@ -212,12 +224,14 @@ end = struct
           SOME entry
         end
   and transParam tenv { name, escape, typ = typSym, pos } =
+        (* Typecheck a Function Parameter Declaration *)
         case Symbol.look (tenv, typSym) of
           NONE =>
             (error pos "undefined paramter type"; { name = name, ty = T.NIL })
         | SOME ty =>
             { name = name, ty = ty }
   and transExp (venv, tenv) =
+    (* Typecheck an Absyn.exp *)
     let
       fun trexp (A.IntExp i) =
             { exp = (), ty = T.INT }
@@ -284,26 +298,35 @@ end = struct
                  (error pos "test should be an integer";
                   { exp = (), ty = T.UNIT }))
         | trexp (A.WhileExp { test, body, pos }) =
-            (case (trexp test, trexp body) of
+            (loopNesting := !loopNesting + 1;
+             (case (trexp test, trexp body) of
                ({ exp = _, ty = T.INT }, { exp = _, ty = T.UNIT }) =>
-                 { exp = (), ty = T.UNIT }
+                ()
              | ({ exp = _, ty = T.INT }, bodyExp) =>
-                 (error pos "while body must produce no value";
-                  { exp = (), ty = T.UNIT })
+                (error pos "while body must produce no value")
              | _ =>
-                 (error pos "while test must be an integer";
-                  { exp = (), ty = T.UNIT }))
+                (error pos "while test must be an integer")
+              );
+              loopNesting := !loopNesting - 1;
+              { exp = (), ty = T.UNIT })
         | trexp (A.ForExp { var, lo, hi, body, pos, escape }) =
             let
               val venv' = Symbol.enter (venv, var, Env.VarEntry { ty = T.INT })
             in
               (checkInt (trexp lo, pos); checkInt (trexp hi, pos);
+               loopNesting := !loopNesting + 1;
                checkSame ({ exp = (), ty = T.UNIT }, transExp (venv', tenv) body, pos);
+               loopNesting := !loopNesting - 1;
                { exp = (), ty = T.UNIT }
               )
             end
-        | trexp (A.BreakExp _) =
-            { exp = (), ty = T.UNIT }
+        | trexp (A.BreakExp pos) =
+            ((if !loopNesting > 0 then
+                ()
+              else
+                (error pos "`break` must be in a `for` or `while` expression")
+             );
+             { exp = (), ty = T.UNIT })
         | trexp (A.ArrayExp { typ, size, init, pos }) =
             (case Symbol.look (tenv, typ) of
                NONE =>
@@ -412,6 +435,7 @@ end = struct
       trexp
     end
 
+  (* Typecheck an Entire Program *)
   fun transProg exp = let
     val result = transExp (Env.base_venv, Env.base_tenv) exp
   in () end
