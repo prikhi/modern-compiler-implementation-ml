@@ -50,7 +50,7 @@ structure PentiumFrame : FRAME = struct
   fun allocLocal (frame : frame) escape =
     if escape then
       (#localsAllocated frame := !(#localsAllocated frame) + 1;
-       InFrame (!(#localsAllocated frame)))
+       InFrame (~ (!(#localsAllocated frame) * 8)))
     else
       InReg (Temp.newtemp ())
 
