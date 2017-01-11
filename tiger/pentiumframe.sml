@@ -21,7 +21,7 @@ structure PentiumFrame : FRAME = struct
     if escape then
       let
         val formalNumber = !(#formalsAllocated frame) + 1
-        val offset = formalNumber * 8 + 8
+        val offset = formalNumber * 4 + 4
       in
         #formalsAllocated frame := formalNumber;
         InFrame offset
@@ -50,7 +50,7 @@ structure PentiumFrame : FRAME = struct
   fun allocLocal (frame : frame) escape =
     if escape then
       (#localsAllocated frame := !(#localsAllocated frame) + 1;
-       InFrame (~ (!(#localsAllocated frame) * 8)))
+       InFrame (~ (!(#localsAllocated frame) * 4)))
     else
       InReg (Temp.newtemp ())
 
