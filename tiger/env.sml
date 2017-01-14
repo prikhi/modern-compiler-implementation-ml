@@ -40,14 +40,27 @@ structure Env : ENV = struct
   val base_venv =
     S.enter' S.empty
       (List.map
-        (fn (s, t) => ( Symbol.symbol s
-                      , FunEntry
-                        { formals = #formals t
-                        , result = #result t
-                        , level = Translate.outermost
-                        , label = Temp.newlabel ()
-                        }
-                      ))
+        (fn (s, t) =>
+          let
+            val label =
+              Temp.namedlabel s
+            val level =
+              Translate.newLevel
+                { parent = Translate.outermost
+                , name = label
+                , formals = List.map (fn _ => false) (#formals t)
+                }
+          in
+            ( Symbol.symbol s
+            , FunEntry
+              { formals = #formals t
+              , result = #result t
+              , level = level
+              , label = label
+              }
+            )
+          end
+        )
         [ ("print", { formals = [ T.STRING ], result = T.UNIT })
         , ("flush", { formals = [], result = T.UNIT })
         , ("getchar", { formals = [], result = T.STRING })

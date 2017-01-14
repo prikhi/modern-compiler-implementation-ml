@@ -10,11 +10,13 @@ is
     errormsg.sml
     parse.sml
     prabsyn.sml
+    printtree.sml
     symbol.sml
     table.sig
     table.sml
     temp.sig
     temp.sml
+    tree.sml
     types.sml
 
     findescape.sml

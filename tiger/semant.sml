@@ -3,15 +3,16 @@ structure Semant : sig
   type tenv
   type expty
 
-  val transProg : Absyn.exp -> unit
-  val transExp : venv * tenv * Translate.level -> Absyn.exp -> expty
-  val transDec : venv * tenv * Translate.level -> Absyn.dec -> {venv: venv, tenv: tenv}
+  val transProg : Absyn.exp -> Frame.frag list
+  val transExp : venv * tenv * Translate.level * Translate.breakpoint option -> Absyn.exp -> expty
+  val transDec : venv * tenv * Translate.level * Translate.breakpoint option -> Absyn.dec -> {venv: venv, tenv: tenv, exps: Translate.exp list}
   val transTy : tenv * { name : Absyn.symbol, ty : Absyn.ty, pos : Absyn.pos } -> Types.ty
-  val transFun : venv * tenv * Translate.level * Absyn.fundec -> unit
+  val transFun : venv * tenv * { formals: Env.ty list, label: Temp.label, level: Translate.level, result: Env.ty } * Translate.breakpoint option * Absyn.fundec -> unit
 end = struct
   (* Aliases *)
   structure A = Absyn
   structure T = Types
+  structure Tr = Translate
   val error = ErrorMsg.error
 
   (* Type Definitions *)
@@ -102,42 +103,68 @@ end = struct
 
 
   (* Translators *)
-  fun transDec (venv, tenv, level) =
+  fun transDec (venv, tenv, level, breakpoint) =
     (* Typecheck an Absyn.dec *)
     let
       fun trdec (A.VarDec { name, escape, typ = NONE, init, pos }) =
             let
-              val { exp, ty } = transExp (venv, tenv, level) init
+              val { exp, ty } = transExp (venv, tenv, level, breakpoint) init
+              val venv' =
+                Symbol.enter
+                  ( venv
+                  , name
+                  , Env.VarEntry
+                    { ty = ty
+                    , access = Translate.allocLocal level (!escape)
+                    }
+                  )
             in
-              { venv =
-                  Symbol.enter
-                    ( venv
-                    , name
-                    , Env.VarEntry
-                      { ty = ty
-                      , access = Translate.allocLocal level (!escape)
-                      }
-                    )
+              { venv = venv'
               , tenv = tenv
+              , exps =
+                  [ ( Tr.assignExp
+                      ( #exp
+                          ( transExp ( venv', tenv, level, breakpoint )
+                              ( A.VarExp ( A.SimpleVar ( name, pos ) ) )
+                          )
+                      , exp
+                      )
+                    )
+                  ]
               }
             end
         | trdec (A.VarDec { name, escape, typ = SOME (tySym, _), init, pos }) =
-            (case Symbol.look (tenv, tySym) of
-               NONE =>
-                 (error pos "undefined type"; { venv = venv, tenv = tenv })
-             | SOME ty =>
-                 { venv =
-                    Symbol.enter
-                      ( venv
-                      , name
-                      , Env.VarEntry
-                        { ty = ty
-                        , access = Translate.allocLocal level (!escape)
-                        }
-                      )
-                 , tenv = tenv
-                 }
-            )
+            let
+              fun venv' ty =
+                Symbol.enter
+                  ( venv
+                  , name
+                  , Env.VarEntry
+                    { ty = ty
+                    , access = Translate.allocLocal level (!escape)
+                    }
+                  )
+            in
+              (case Symbol.look (tenv, tySym) of
+                NONE =>
+                  (error pos "undefined type"; { venv = venv, tenv = tenv, exps = [] })
+              | SOME ty =>
+                  { venv = venv' ty
+                  , tenv = tenv
+                  , exps =
+                      [ #exp
+                        ( transExp ( venv' ty, tenv, level, breakpoint )
+                          ( A.AssignExp
+                            { var = A.SimpleVar (name, pos)
+                            , exp = init
+                            , pos = pos
+                            }
+                          )
+                        )
+                      ]
+                  }
+              )
+            end
 
         | trdec (A.TypeDec decs) =
             let
@@ -151,6 +178,7 @@ end = struct
               , tenv = List.foldr
                   (fn (ty, env) => Symbol.enter (env, #name ty, transTy (env, ty)))
                   tenv' decs
+              , exps = []
               }
             end
         | trdec (A.FunctionDec decs) =
@@ -163,14 +191,15 @@ end = struct
                 case Symbol.look (venv', #name dec) of
                   NONE =>
                     ErrorMsg.impossible "Semantic Analysis did not find function header"
-                | SOME (Env.FunEntry { level, ... }) =>
-                    transFun (venv', tenv, level, dec)
+                | SOME (Env.FunEntry entry) =>
+                    transFun (venv', tenv, entry, breakpoint, dec)
                 | _ =>
                     ErrorMsg.impossible "Semantic Analysis found variable instead of function header"
             in
               List.map runDec decs;
               { tenv = tenv
               , venv = venv'
+              , exps = []
               }
             end
     in
@@ -201,14 +230,14 @@ end = struct
       val params' =
         List.map #ty
           (List.map (transParam tenv) params)
+      val label =
+        Temp.newlabel ()
       val level' =
         Translate.newLevel
           { parent = level
-          , name = (Temp.newlabel ())
+          , name = label
           , formals = List.map (fn p => !(#escape p)) params
           }
-      val label =
-        Temp.newlabel ()
     in
       (case result of
          SOME (sym, pos) =>
@@ -238,7 +267,7 @@ end = struct
             }
       )
     end
-  and transFun (venv, tenv, level, { name, params, result = SOME (result, resultPos), body, pos }) =
+  and transFun (venv, tenv, entry, breakpoint, { name, params, result = SOME (result, resultPos), body, pos }) =
         (case Symbol.look (tenv, result) of
            NONE =>
              (error resultPos "result type is undefined")
@@ -252,16 +281,25 @@ end = struct
                   , name
                   , Env.VarEntry
                     { ty = ty
-                    , access = Translate.allocLocal level (!escape)
+                    , access = Translate.allocLocal (#level entry) (!escape)
                     }
                   )
                val expResult =
-                 transExp (List.foldr addparam venv params', tenv, level) body
+                 transExp (List.foldr addparam venv params', tenv, (#level entry), breakpoint) body
+               val entry =
+                 case Symbol.look (venv, name) of
+                   NONE =>
+                     ErrorMsg.impossible "Semant.transFun could not find function header"
+                 | SOME (Env.FunEntry e) =>
+                     e
+                 | _ =>
+                     ErrorMsg.impossible "Semant.transFun found variable instead of function header"
              in
-               checkSame ({ exp = (), ty = resultTy }, expResult, pos)
+               checkSame ({ exp = (), ty = resultTy }, expResult, pos);
+               Tr.functionDec (#label entry, #level entry, #exp expResult)
              end
         )
-    | transFun (venv, tenv, level, { name, params, result = NONE, body, pos }) =
+    | transFun (venv, tenv, entry, breakpoint, { name, params, result = NONE, body, pos }) =
         let
           val params' =
             List.map (transParam tenv) params
@@ -271,12 +309,15 @@ end = struct
               , name
               , Env.VarEntry
                 { ty = ty
-                , access = Translate.allocLocal level (!escape)
+                , access = Translate.allocLocal (#level entry) (!escape)
                 }
               )
         in
-          transExp (List.foldr addparam venv params', tenv, level) body;
-          ()
+          Tr.functionDec
+            ( #label entry
+            , #level entry
+            , #exp (transExp (List.foldr addparam venv params', tenv, (#level entry), breakpoint) body)
+            )
         end
   and transParam tenv { name, escape, typ = typSym, pos } =
         (* Typecheck a Function Parameter Declaration *)
@@ -285,35 +326,47 @@ end = struct
             (error pos "undefined paramter type"; { name = name, ty = T.NIL, escape = escape })
         | SOME ty =>
             { name = name, ty = ty, escape = escape }
-  and transExp (venv, tenv, level) =
+  and transExp (venv, tenv, level, breakpoint) =
     (* Typecheck an Absyn.exp *)
     let
       fun trexp (A.IntExp i) =
-            { exp = (), ty = T.INT }
+            { exp = Tr.intExp i, ty = T.INT }
         | trexp (A.StringExp (s, pos)) =
-            { exp = (), ty = T.STRING }
+            { exp = Tr.stringExp s, ty = T.STRING }
         | trexp (A.VarExp var) =
             trvar var
         | trexp (A.NilExp) =
-            { exp = (), ty = T.NIL }
+            { exp = Tr.nilExp, ty = T.NIL }
         | trexp (A.OpExp opExp) =
             transOp opExp
         | trexp (A.CallExp { func, args, pos }) =
             (case Symbol.look (venv, func) of
                NONE =>
-                 (error pos "undefined function"; { exp = (), ty = T.NIL })
-             | SOME (Env.FunEntry { formals, result, label, level }) =>
-                (ListPair.map
-                  (fn (exp, frm) =>
-                    (checkSame ({ exp = (), ty = frm }, trexp exp, pos)))
-                  (List.rev args, formals);
-                 { exp = (), ty = result })
+                 (error pos "undefined function"; { exp = Tr.nilExp, ty = T.NIL })
+             | SOME (Env.FunEntry { formals, result, label, level = funcLevel }) =>
+                 if List.length args <> List.length formals then
+                    (error pos "wrong number of arguments"; { exp = Tr.nilExp, ty = result })
+                 else
+                    { exp =
+                        Tr.callExp
+                          ( label
+                          , funcLevel
+                          , ListPair.map
+                              (fn (exp, frm) =>
+                                let val exp' = trexp exp
+                                in (checkSame ({ exp = (), ty = actual_ty frm }, { exp = (), ty = actual_ty (#ty exp') }, pos);
+                                    #exp exp')
+                                end)
+                              (List.rev args, formals)
+                          , level)
+                    , ty = result
+                    }
              | SOME (Env.VarEntry _) =>
-                (error pos "expecting a function"; { exp = (), ty = T.NIL }))
+                (error pos "expecting a function"; { exp = Tr.nilExp, ty = T.NIL }))
         | trexp (A.RecordExp { fields, typ, pos }) =
             (case Symbol.look (tenv, typ) of
                NONE =>
-                (error pos "undefined type"; { exp = (), ty = T.NIL })
+                (error pos "undefined type"; { exp = Tr.nilExp, ty = T.NIL })
              | SOME (ty as (T.RECORD (tys, _))) =>
                 (ListPair.map
                   (fn ((sym, exp, pos), (tySym, ty)) =>
@@ -322,93 +375,139 @@ end = struct
                     else
                       (error pos ("expecting `" ^ Symbol.name tySym ^ "`, given `" ^ Symbol.name sym ^ "`"))
                   ) (List.rev fields, tys);
-                 { exp = (), ty = ty })
+                 { exp = Tr.recordExp (List.map (fn (_, e, _) => #exp (trexp e)) (List.rev fields))
+                 , ty = ty }
+                 )
              | SOME _ =>
-                 (error pos "expecting a record"; { exp = (), ty = T.NIL }))
+                 (error pos "expecting a record"; { exp = Tr.nilExp, ty = T.NIL }))
         | trexp (A.SeqExp exps) =
-            (case exps of
-               [] =>
-                 { exp = (), ty = T.UNIT }
-             | (exp, pos) :: [] =>
-                 { exp = (), ty = #ty (trexp exp) }
-             | (exp, pos) :: xs =>
-                 (trexp exp;
-                  trexp (A.SeqExp xs)))
+            let
+              fun runExps ((e, _), { lastTy, exps }) =
+                let val { exp, ty } = trexp e
+                in { exps = exp :: exps, lastTy = ty } end
+            in
+              (case exps of
+                [] =>
+                  { exp = Tr.nilExp, ty = T.UNIT }
+              | xs =>
+                  let val result = List.foldl runExps { exps = [], lastTy = T.NIL } xs
+                  in { exp = Tr.seqExp (#exps result), ty = #lastTy result } end
+              )
+            end
         | trexp (A.AssignExp { var, exp, pos }) =
           let
             val varResult = trvar var
             val expResult = trexp exp
           in
-            (checkSame (varResult, expResult, pos); { exp = (), ty = T.UNIT })
+            (checkSame ( { exp = (), ty = actual_ty (#ty varResult)}
+                       , { exp = (), ty = actual_ty (#ty expResult)}, pos);
+             { exp = Tr.assignExp (#exp varResult, #exp expResult), ty = T.UNIT })
           end
         | trexp (A.IfExp { test, then', else', pos }) =
             (case (trexp test, trexp then', Option.map trexp else') of
-               ({ exp = _, ty = T.INT }, (thenExp as { exp = _, ty = thenTy }), SOME elseExp) =>
-                 (checkSame (thenExp, elseExp, pos);
-                  { exp = (), ty = thenTy })
-             | ({ exp = _, ty = T.INT }, thenExp, NONE) =>
+               ({ exp = testExp, ty = T.INT }, (thenRec as { exp = thenExp, ty = thenTy }), SOME (elseRec as { exp = elseExp, ty = elseTy })) =>
+                 (checkSame (thenRec, elseRec, pos);
+                  { exp = Tr.ifThenElseExp (testExp, thenExp, elseExp), ty = thenTy })
+             | ({ exp = testExp, ty = T.INT }, thenExp, NONE) =>
                  (checkSame ({ exp = (), ty = T.UNIT }, thenExp, pos);
-                  { exp = (), ty = T.UNIT })
+                  { exp = Tr.ifThenExp (testExp, #exp thenExp), ty = T.UNIT })
              | (testExp, _, _) =>
                  (error pos "test should be an integer";
-                  { exp = (), ty = T.UNIT }))
+                  { exp = Tr.nilExp, ty = T.UNIT }))
         | trexp (A.WhileExp { test, body, pos }) =
-            (loopNesting := !loopNesting + 1;
-             (case (trexp test, trexp body) of
-               ({ exp = _, ty = T.INT }, { exp = _, ty = T.UNIT }) =>
-                ()
-             | ({ exp = _, ty = T.INT }, bodyExp) =>
-                (error pos "while body must produce no value")
-             | _ =>
-                (error pos "while test must be an integer")
-              );
-              loopNesting := !loopNesting - 1;
-              { exp = (), ty = T.UNIT })
-        | trexp (A.ForExp { var, lo, hi, body, pos, escape }) =
             let
-              val venv' =
-                Symbol.enter
-                  ( venv
-                  , var
-                  , Env.VarEntry
-                    { ty = T.INT
-                    , access = Translate.allocLocal level (!escape)
-                    }
-                  )
+              val doneBreakpoint = Tr.newBreakpoint ()
             in
-              (checkInt (trexp lo, pos); checkInt (trexp hi, pos);
-               loopNesting := !loopNesting + 1;
-               checkSame ({ exp = (), ty = T.UNIT }, transExp (venv', tenv, level) body, pos);
-               loopNesting := !loopNesting - 1;
-               { exp = (), ty = T.UNIT }
+              (case (trexp test, transExp (venv, tenv, level, SOME doneBreakpoint) body) of
+                 ({ exp = testExp, ty = T.INT }, { exp = bodyExp, ty = T.UNIT }) =>
+                   { exp = Tr.whileExp (testExp, bodyExp, doneBreakpoint), ty = T.UNIT }
+               | ({ exp = _, ty = T.INT }, _) =>
+                   (error pos "while body must produce no value";
+                    { exp = Tr.nilExp, ty = T.UNIT })
+               | _ =>
+                   (error pos "while test must be an integer";
+                    { exp = Tr.nilExp, ty = T.UNIT })
               )
             end
+        | trexp (A.ForExp { var, lo, hi, body, pos, escape }) =
+            let
+              val limitSymbol =
+                Symbol.symbol "TIGERCOMPILERFORLOOPLIMIT"
+              val decs =
+                [ A.VarDec
+                    { name = var, escape = escape, pos = pos
+                    , typ = SOME (Symbol.symbol "int", pos), init = lo
+                    }
+                , A.VarDec
+                    { name = limitSymbol, escape = ref false, pos = pos
+                    , typ = SOME (Symbol.symbol "int", pos), init = hi
+                    }
+                ]
+              val exp =
+                A.WhileExp
+                  { test =
+                      A.OpExp
+                        { left = A.VarExp (A.SimpleVar (var, pos))
+                        , right = A.VarExp (A.SimpleVar (limitSymbol, pos))
+                        , oper = A.LeOp
+                        , pos = pos
+                        }
+                  , body =
+                    A.SeqExp
+                      [ (body, pos)
+                      , ( A.AssignExp
+                            { var = A.SimpleVar (var, pos)
+                            , exp =
+                                A.OpExp
+                                  { left = A.VarExp (A.SimpleVar (var, pos))
+                                  , right = A.IntExp 1
+                                  , oper = A.PlusOp
+                                  , pos = pos
+                                  }
+                            , pos = pos
+                            }
+                        , pos
+                        )
+                      ]
+                  , pos = pos
+                  }
+            in
+              trexp (A.LetExp { decs = decs, body = exp, pos = pos })
+            end
         | trexp (A.BreakExp pos) =
-            ((if !loopNesting > 0 then
-                ()
-              else
-                (error pos "`break` must be in a `for` or `while` expression")
-             );
-             { exp = (), ty = T.UNIT })
+            (case breakpoint of
+               SOME bp =>
+                { exp = Tr.breakExp bp, ty = T.UNIT}
+             | NONE =>
+                (error pos "`break` must be in a `for` or `while` expression";
+                 { exp = Tr.nilExp, ty = T.UNIT })
+             )
         | trexp (A.ArrayExp { typ, size, init, pos }) =
             (case Symbol.look (tenv, typ) of
                NONE =>
-                (error pos "undefined type"; { exp = (), ty = T.UNIT })
+                (error pos "undefined type"; { exp = Tr.nilExp, ty = T.UNIT })
              | SOME arrayTy =>
-                (checkSame ( { exp = (), ty = actual_ty arrayTy }
-                           , { exp = (), ty = T.ARRAY (actual_ty (#ty (trexp init)), ref ()) }
-                           , pos);
-                 checkInt (trexp size, pos);
-                 { exp = (), ty = arrayTy }))
+                 let
+                   val sizeExp = trexp size
+                   val initExp = trexp init
+                 in
+                  (checkSame ( { exp = (), ty = actual_ty arrayTy }
+                             , { exp = (), ty = T.ARRAY (actual_ty (#ty initExp), ref ()) }
+                             , pos);
+                   checkInt ({ exp = (), ty = actual_ty (#ty sizeExp) }, pos);
+                   { exp = Tr.arrayExp (#exp sizeExp, #exp initExp), ty = arrayTy })
+                 end
+            )
         | trexp (A.LetExp { decs, body, pos }) =
             let
-              val { venv = venv', tenv = tenv' } =
-                List.foldl (fn (dec, { venv, tenv }) => transDec (venv, tenv, level) dec)
-                  { venv = venv, tenv = tenv } decs
-
-                val bodyExp = transExp (venv', tenv', level) body
+              fun reducer (dec, { venv, tenv, exps }) =
+                let val result = transDec (venv, tenv, level, breakpoint) dec
+                in  { venv = #venv result, tenv = #tenv result, exps = #exps result @ exps } end
+              val { venv = venv', tenv = tenv', exps } =
+                List.foldl reducer { venv = venv, tenv = tenv, exps = [] } decs
+              val bodyExp = transExp (venv', tenv', level, breakpoint) body
             in
-              { exp = (), ty = #ty bodyExp }
+              { exp = Tr.letExp (exps, #exp bodyExp), ty = #ty bodyExp }
             end
       and transOp { left, right, pos, oper } =
         let
@@ -418,80 +517,170 @@ end = struct
           case oper of
             A.PlusOp =>
               (checkBothInt (leftExp, rightExp, pos);
-               { exp = (), ty = T.INT })
+               { exp = Tr.intOpExp (#exp leftExp, #exp rightExp, oper), ty = T.INT })
           | A.MinusOp =>
               (checkBothInt (leftExp, rightExp, pos);
-               { exp = (), ty = T.INT })
+               { exp = Tr.intOpExp (#exp leftExp, #exp rightExp, oper), ty = T.INT })
           | A.TimesOp =>
               (checkBothInt (leftExp, rightExp, pos);
-               { exp = (), ty = T.INT })
+               { exp = Tr.intOpExp (#exp leftExp, #exp rightExp, oper), ty = T.INT })
           | A.DivideOp =>
               (checkBothInt (leftExp, rightExp, pos);
-               { exp = (), ty = T.INT })
+               { exp = Tr.intOpExp (#exp leftExp, #exp rightExp, oper), ty = T.INT })
           | A.LtOp =>
-              (checkBothIntOrString (leftExp, rightExp, pos);
-               { exp = (), ty = T.INT })
+              let
+                val result =
+                  case #ty leftExp of
+                    T.INT =>
+                      Tr.intCondExp (#exp leftExp, #exp rightExp, oper)
+                  | T.STRING =>
+                      Tr.stringCondExp (#exp leftExp, #exp rightExp, oper)
+                  | _ =>
+                      Tr.nilExp
+              in
+                (checkBothIntOrString (leftExp, rightExp, pos);
+                 { exp = result, ty = T.INT })
+              end
           | A.LeOp =>
-              (checkBothIntOrString (leftExp, rightExp, pos);
-               { exp = (), ty = T.INT })
+              let
+                val result =
+                  case #ty leftExp of
+                    T.INT =>
+                      Tr.intCondExp (#exp leftExp, #exp rightExp, oper)
+                  | T.STRING =>
+                      Tr.stringCondExp (#exp leftExp, #exp rightExp, oper)
+                  | _ =>
+                      Tr.nilExp
+              in
+                (checkBothIntOrString (leftExp, rightExp, pos);
+                 { exp = result, ty = T.INT })
+              end
           | A.GtOp =>
-              (checkBothIntOrString (leftExp, rightExp, pos);
-               { exp = (), ty = T.INT })
+              let
+                val result =
+                  case #ty leftExp of
+                    T.INT =>
+                      Tr.intCondExp (#exp leftExp, #exp rightExp, oper)
+                  | T.STRING =>
+                      Tr.stringCondExp (#exp leftExp, #exp rightExp, oper)
+                  | _ =>
+                      Tr.nilExp
+              in
+                (checkBothIntOrString (leftExp, rightExp, pos);
+                 { exp = result, ty = T.INT })
+              end
           | A.GeOp =>
-              (checkBothIntOrString (leftExp, rightExp, pos);
-               { exp = (), ty = T.INT })
+              let
+                val result =
+                  case #ty leftExp of
+                    T.INT =>
+                      Tr.intCondExp (#exp leftExp, #exp rightExp, oper)
+                  | T.STRING =>
+                      Tr.stringCondExp (#exp leftExp, #exp rightExp, oper)
+                  | _ =>
+                      Tr.nilExp
+              in
+                (checkBothIntOrString (leftExp, rightExp, pos);
+                 { exp = result, ty = T.INT })
+              end
           | A.EqOp =>
-              (checkBothEq (leftExp, rightExp, pos);
-                { exp = (), ty = T.INT })
+              let
+                val result =
+                  case #ty leftExp of
+                    T.INT =>
+                      Tr.intCondExp (#exp leftExp, #exp rightExp, oper)
+                  | T.STRING =>
+                      Tr.stringCondExp (#exp leftExp, #exp rightExp, oper)
+                  | T.ARRAY _ =>
+                      Tr.arrayRecordEqualityExp (#exp leftExp, #exp rightExp, oper)
+                  | T.RECORD _ =>
+                      Tr.arrayRecordEqualityExp (#exp leftExp, #exp rightExp, oper)
+                  | _ =>
+                      Tr.nilExp
+              in
+                (checkBothEq (leftExp, rightExp, pos);
+                 { exp = result, ty = T.INT }
+                )
+              end
           | A.NeqOp =>
-              (checkBothEq (leftExp, rightExp, pos);
-                { exp = (), ty = T.INT })
+              let
+                val result =
+                  case #ty leftExp of
+                    T.INT =>
+                      Tr.intCondExp (#exp leftExp, #exp rightExp, oper)
+                  | T.STRING =>
+                      Tr.stringCondExp (#exp leftExp, #exp rightExp, oper)
+                  | T.ARRAY _ =>
+                      Tr.arrayRecordEqualityExp (#exp leftExp, #exp rightExp, oper)
+                  | T.RECORD _ =>
+                      Tr.arrayRecordEqualityExp (#exp leftExp, #exp rightExp, oper)
+                  | _ =>
+                      Tr.nilExp
+              in
+                (checkBothEq (leftExp, rightExp, pos);
+                 { exp = result, ty = T.INT }
+                )
+              end
         end
       and trvar (A.SimpleVar (id, pos)) =
             ( case Symbol.look (venv, id) of
                NONE =>
                 (error pos ("undefined variable `" ^ Symbol.name id ^ "`" );
-                  { exp = (), ty = T.INT })
+                  { exp = Tr.nilExp, ty = T.INT })
              | SOME (Env.VarEntry { ty, access }) =>
-                { exp = (), ty = actual_ty ty }
+                { exp = Tr.simpleVar (access, level), ty = actual_ty ty }
              | SOME _ =>
                 (error pos "expecting a variable, not a function";
-                 { exp = (), ty = T.INT })
+                 { exp = Tr.nilExp, ty = T.INT })
             )
         | trvar (A.FieldVar (var, id, pos)) =
             let
               val { exp, ty } = trvar var
+              fun fieldResult record (acc, fs) =
+                case fs of
+                  [] =>
+                    (error pos ("field `" ^ Symbol.name id ^ "` is not a member of that record type" );
+                     { exp = Tr.nilExp, ty = record })
+                | (s, t) :: rest =>
+                    if (s = id) then
+                      { exp = Tr.fieldVar (exp, acc), ty = t }
+                    else
+                      fieldResult record (acc + 1, rest)
             in
               case actual_ty ty of
                 (record as (T.RECORD (fields, _))) =>
-                  (case List.filter (fn (s, t) => s = id) fields of
-                     [] =>
-                        (error pos ("field `" ^ Symbol.name id ^ "` is not a member of that record type" );
-                         { exp = (), ty = record })
-                   | (s, t) :: _ =>
-                        { exp = (), ty = t })
+                  (fieldResult record (0, fields))
               | _ =>
-                  (error pos "expecting a record variable"; { exp = (), ty = T.INT })
+                  (error pos "expecting a record variable"; { exp = Tr.nilExp, ty = T.INT })
             end
         | trvar (A.SubscriptVar (var, exp, pos)) =
             let
-              val { exp, ty } = trvar var
+              val { exp = varExp, ty } = trvar var
             in
               case actual_ty ty of
                 (array as (T.ARRAY (arrayTy, _))) =>
-                  { exp = (), ty = arrayTy }
+                  { exp = Tr.subscriptVar (varExp, #exp (trexp exp)), ty = arrayTy }
               | _ =>
-                  (error pos "expecting an array variable"; { exp = (), ty = T.INT })
+                  (error pos "expecting an array variable";
+                   { exp = Tr.nilExp, ty = T.INT })
             end
       and actual_ty ty =
         case ty of
           T.NAME (sym, opTy) =>
             (case !opTy of
               NONE =>
-                ty
+                (case Symbol.look (tenv, sym) of
+                   NONE =>
+                    ty
+                 | SOME ty' =>
+                     (opTy := SOME ty';
+                      actual_ty ty')
+                )
             | SOME ty =>
                 actual_ty ty
             )
+        | T.ARRAY (ty', r) =>
+            T.ARRAY (actual_ty ty', r)
         | _ =>
             ty
     in
@@ -509,8 +698,9 @@ end = struct
           , name = Temp.newlabel ()
           , formals = []
           }
+        , NONE
         )
         exp
-  in () end
+  in Translate.getResult () end
 
 end
