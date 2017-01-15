@@ -19,6 +19,7 @@ is
     tree.sml
     types.sml
 
+    canon.sml
     findescape.sml
     frame.sig
     pentiumframe.sml

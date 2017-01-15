@@ -104,3 +104,11 @@ Built-in functions are defined in the C runtime and as a child of the `Top`
 frame level. Array allocation & initialization is also handled by the runtime,
 in addition to record allocation, but not record initialization. The string
 comparison functions are also implemented in C.
+
+
+# Canonicalization
+
+The book provides most of the re-ordering & tracing code, but the `do_stm`,
+`do_exp`, & `basicBlocks` functions were written ourselves.
+
+The book code may eventually be rewritten.
