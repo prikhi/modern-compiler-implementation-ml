@@ -123,7 +123,7 @@ The book code may eventually be rewritten.
 
 Machine code is currently only generated for the Pentium x86 32-bit
 architecture, via the `PentiumGen` structure. [UVA's x86 Assembly
-Guide](assembly-guide) was used as a register/instruction reference.
+Guide][assembly-guide] was used as a register/instruction reference.
 
 
 [assembly-guide]: https://www.cs.virginia.edu/~evans/cs216/guides/x86.html
