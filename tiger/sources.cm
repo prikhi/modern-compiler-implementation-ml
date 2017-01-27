@@ -1,11 +1,17 @@
 Library
     structure Main
+    structure Absyn
     structure Parse
     structure PentiumFrame
+    structure PentiumGen
     structure Translate
+    structure Semant
+    structure Printtree
+    structure PrintAbsyn
 is
 
     absyn.sml
+    assem.sml
     env.sml
     errormsg.sml
     parse.sml
@@ -19,10 +25,13 @@ is
     tree.sml
     types.sml
 
+    codegen.sig
+    frame.sig
+
     canon.sml
     findescape.sml
-    frame.sig
     pentiumframe.sml
+    pentiumgen.sml
     semant.sml
     tiger.grm
     tiger.lex

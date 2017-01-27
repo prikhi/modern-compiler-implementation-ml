@@ -11,11 +11,16 @@ REPL:
 
 ```
 - CM.make "sources.cm";
+- Main.compile "test.tig";
 - Main.main "test.tig";
-- Parse.print "test.tig";
+- Main.printAbsyn "test.tig";
+- Main.printIR "test.tig";
+- Main.printAssem "test.tig";
 - Main.test ();
 - Main.runTest 42;
-- Main.printTest 42;
+- Main.printTestAbsyn 42;
+- Main.printTestIR 42;
+- Main.printTestAssem 42;
 ```
 
 # Lexer
@@ -93,7 +98,7 @@ module.
 
 Translation expressions are categorized by `Ex`, `Nx`, & `Cx` constructors,
 used for expressions, statements, & conditional jumps. `For` expressions are
-re-written as `While` expressions. 
+re-written as `While` expressions.
 
 
 Static Links are passed as the first argument to functions. This is hidden
@@ -112,3 +117,13 @@ The book provides most of the re-ordering & tracing code, but the `do_stm`,
 `do_exp`, & `basicBlocks` functions were written ourselves.
 
 The book code may eventually be rewritten.
+
+
+# Code Generation
+
+Machine code is currently only generated for the Pentium x86 32-bit
+architecture, via the `PentiumGen` structure. [UVA's x86 Assembly
+Guide](assembly-guide) was used as a register/instruction reference.
+
+
+[assembly-guide]: https://www.cs.virginia.edu/~evans/cs216/guides/x86.html

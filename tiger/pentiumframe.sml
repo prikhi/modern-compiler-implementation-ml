@@ -6,6 +6,9 @@ structure PentiumFrame : FRAME = struct
     = InFrame of int
     | InReg of Temp.temp
 
+  type register =
+    string
+
   type frame =
     { formals : access list
     , formalsAllocated : int ref
@@ -20,8 +23,43 @@ structure PentiumFrame : FRAME = struct
 
   val wordSize = 4
 
-  val FP = Temp.newtemp ()
-  val RV = Temp.newtemp ()
+  (* Internal Registers *)
+  val ESI = Temp.newtemp ()
+  val EDI = Temp.newtemp ()
+
+  val ESP = Temp.newtemp ()
+  val EBP = Temp.newtemp ()
+
+  val EAX = Temp.newtemp ()
+  val EBX = Temp.newtemp ()
+  val ECX = Temp.newtemp ()
+  val EDX = Temp.newtemp ()
+
+  val FP = EBP
+  val RV = EAX
+
+  val tempMap =
+    List.foldr
+      (fn ((str, reg), table) => Temp.Table.enter (table, reg, str)) Temp.Table.empty
+      [ ("ESI", ESI)
+      , ("EDI", EDI)
+      , ("ESP", ESP)
+      , ("EBP", EBP)
+      , ("EAX", EAX)
+      , ("EBX", EBX)
+      , ("ECX", ECX)
+      , ("EDX", EDX)
+      ]
+
+
+  val specialRegs = [ EBP, ESP ]
+  val argRegs = []
+  val calleeSaves = [ EBX, EDI, ESI ]
+  val callerSaves = [ EAX, ECX, EDX ]
+
+  val callDests = [ EAX, ECX, EDX, RV ]
+  val divideDests = [ EAX, EDX ]
+  val dividendRegister = EAX
 
 
   val name : frame -> Temp.label = #name
@@ -69,13 +107,26 @@ structure PentiumFrame : FRAME = struct
       InFrame offset =>
         T.MEM (T.BINOP (T.PLUS, tExp, T.CONST offset))
     | InReg reg =>
-        T.MEM (T.TEMP reg)
+        T.TEMP reg
 
   fun externalCall (name, args) =
     T.CALL ( T.NAME (Temp.namedlabel name), args )
 
   fun procEntryExit1 (_, body) =
     body
+
+  fun procEntryExit2 (_, body) =
+    body @ [
+      Assem.OPER
+        { assem = "", src = [EAX, ESP] @ calleeSaves, dst = [], jump = SOME [] }
+    ]
+
+  fun procEntryExit3 (frame : frame, body) =
+    { prolog = "PROCEDURE " ^ Symbol.name (#name frame) ^ "\n"
+    , body = body
+    , epilog = "RET\nEND " ^ Symbol.name (#name frame) ^ "\n"
+    }
+
 end
 
 structure Frame : FRAME = PentiumFrame

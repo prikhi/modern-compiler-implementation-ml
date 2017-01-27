@@ -44,7 +44,6 @@ end
 structure Translate : TRANSLATE = struct
   structure T = Tree
 
-
   datatype exp
     = Ex of T.exp
     | Nx of T.stm
@@ -181,7 +180,7 @@ structure Translate : TRANSLATE = struct
     ref []
 
   fun procEntryExit { level = Level level, body } =
-    results := Frame.PROC { body = unNx body, frame = #frame level } :: !results
+    results := Frame.PROC { body = T.SEQ (T.LABEL (Frame.name (#frame level)),unNx body), frame = #frame level } :: !results
     | procEntryExit { level = TOP, ... } =
         ErrorMsg.impossible "Translate.procEntryExit passed Top level"
 
@@ -189,7 +188,11 @@ structure Translate : TRANSLATE = struct
     results := Frame.STRING frag :: !results
 
   fun getResult _ =
-    !results
+    let
+      val temp = !results
+    in
+      (results := []; temp)
+    end
 
 
   fun simpleVar ((varLevel, access), currentLevel) =
@@ -325,12 +328,10 @@ structure Translate : TRANSLATE = struct
     in
       Ex
         ( T.ESEQ
-          ( seq
-            [ T.MOVE
-              ( T.TEMP r
-              , Frame.externalCall ("initArray", [ unEx sizeExp, unEx initExp ])
-              )
-            ]
+          ( T.MOVE
+            ( T.TEMP r
+            , Frame.externalCall ("initArray", [ unEx sizeExp, unEx initExp ])
+            )
           , T.TEMP r
           )
         )
@@ -484,16 +485,10 @@ structure Translate : TRANSLATE = struct
   fun functionDec (label, Level level, bodyExp) =
         let
           val body =
-            Ex
-              ( T.ESEQ
-                ( T.SEQ
-                  ( Frame.procEntryExit1 (#frame level, unNx bodyExp)
-                  , T.MOVE
-                    ( T.TEMP Frame.RV
-                    , unEx bodyExp
-                    )
-                  )
-                , T.TEMP Frame.RV
+            Nx
+              ( T.MOVE
+                ( T.TEMP Frame.RV
+                , Frame.procEntryExit1 (#frame level, unEx bodyExp)
                 )
               )
         in
@@ -501,6 +496,5 @@ structure Translate : TRANSLATE = struct
         end
     | functionDec (_, Top, _) =
         ErrorMsg.impossible "Translate.functionDec passed Top level"
-
 
 end

@@ -109,39 +109,37 @@ end = struct
       fun trdec (A.VarDec { name, escape, typ = NONE, init, pos }) =
             let
               val { exp, ty } = transExp (venv, tenv, level, breakpoint) init
+              val access = Translate.allocLocal level (!escape)
               val venv' =
                 Symbol.enter
                   ( venv
                   , name
                   , Env.VarEntry
                     { ty = ty
-                    , access = Translate.allocLocal level (!escape)
+                    , access = access
                     }
                   )
             in
               { venv = venv'
               , tenv = tenv
               , exps =
-                  [ ( Tr.assignExp
-                      ( #exp
-                          ( transExp ( venv', tenv, level, breakpoint )
-                              ( A.VarExp ( A.SimpleVar ( name, pos ) ) )
-                          )
-                      , exp
-                      )
+                  [ Tr.assignExp
+                    ( Tr.simpleVar (access, level)
+                    , exp
                     )
                   ]
               }
             end
         | trdec (A.VarDec { name, escape, typ = SOME (tySym, _), init, pos }) =
             let
+              val access = Translate.allocLocal level (!escape)
               fun venv' ty =
                 Symbol.enter
                   ( venv
                   , name
                   , Env.VarEntry
                     { ty = ty
-                    , access = Translate.allocLocal level (!escape)
+                    , access = access
                     }
                   )
             in
@@ -152,14 +150,9 @@ end = struct
                   { venv = venv' ty
                   , tenv = tenv
                   , exps =
-                      [ #exp
-                        ( transExp ( venv' ty, tenv, level, breakpoint )
-                          ( A.AssignExp
-                            { var = A.SimpleVar (name, pos)
-                            , exp = init
-                            , pos = pos
-                            }
-                          )
+                      [ Tr.assignExp
+                        ( Tr.simpleVar (access, level)
+                        , #exp (transExp (venv, tenv, level, breakpoint) init)
                         )
                       ]
                   }
@@ -390,7 +383,7 @@ end = struct
                 [] =>
                   { exp = Tr.nilExp, ty = T.UNIT }
               | xs =>
-                  let val result = List.foldl runExps { exps = [], lastTy = T.NIL } xs
+                  let val result = List.foldr runExps { exps = [], lastTy = T.NIL } xs
                   in { exp = Tr.seqExp (#exps result), ty = #lastTy result } end
               )
             end
@@ -502,7 +495,7 @@ end = struct
             let
               fun reducer (dec, { venv, tenv, exps }) =
                 let val result = transDec (venv, tenv, level, breakpoint) dec
-                in  { venv = #venv result, tenv = #tenv result, exps = #exps result @ exps } end
+                in  { venv = #venv result, tenv = #tenv result, exps = exps @ #exps result } end
               val { venv = venv', tenv = tenv', exps } =
                 List.foldl reducer { venv = venv, tenv = tenv, exps = [] } decs
               val bodyExp = transExp (venv', tenv', level, breakpoint) body
@@ -689,18 +682,22 @@ end = struct
 
   (* Typecheck an Entire Program *)
   fun transProg exp = let
+    val level =
+      Translate.newLevel
+        { parent = Translate.outermost
+        , name = Temp.namedlabel "_tiger_main"
+        , formals = []
+        }
     val result =
       transExp
         ( Env.base_venv
         , Env.base_tenv
-        , Translate.newLevel
-          { parent = Translate.outermost
-          , name = Temp.newlabel ()
-          , formals = []
-          }
+        , level
         , NONE
         )
         exp
-  in Translate.getResult () end
+  in
+    Tr.procEntryExit { level = level, body = #exp result }; Translate.getResult ()
+  end
 
 end

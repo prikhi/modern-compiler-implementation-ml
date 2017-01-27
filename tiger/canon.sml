@@ -18,8 +18,6 @@ structure Canon : CANON = struct
     | _ =>
         false
 
-
-
   val noop = T.EXP (T.CONST 0)
   fun join (T.EXP (T.CONST _), x) = x
     | join (x, T.EXP (T.CONST _)) = x
@@ -125,29 +123,6 @@ structure Canon : CANON = struct
     end
 
   (* from book code *)
-  fun basicBlocks stms = 
-     let val done = Temp.newlabel()
-         fun blocks((head as T.LABEL _) :: tail, blist) =
-	     let fun next((s as (T.JUMP _))::rest, thisblock) =
-		                endblock(rest, s::thisblock)
-		   | next((s as (T.CJUMP _))::rest, thisblock) =
-                                endblock(rest,s::thisblock)
-		   | next(stms as (T.LABEL lab :: _), thisblock) =
-                                next(T.JUMP(T.NAME lab,[lab]) :: stms, thisblock)
-		   | next(s::rest, thisblock) = next(rest, s::thisblock)
-		   | next(nil, thisblock) = 
-			     next([T.JUMP(T.NAME done, [done])], thisblock)
-		 
-		 and endblock(stms, thisblock) = 
-		            blocks(stms, rev thisblock :: blist)
-		     
-	     in next(tail, [head])
-	     end
-	   | blocks(nil, blist) = rev blist
-	   | blocks(stms, blist) = blocks(T.LABEL(Temp.newlabel())::stms, blist)
-      in (blocks(stms,nil), done)
-     end
-
   fun enterblock(b as (T.LABEL s :: _), table) = Symbol.enter(table,s,b)
     | enterblock(_, table) = table
 
