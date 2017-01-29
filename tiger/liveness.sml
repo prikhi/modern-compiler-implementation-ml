@@ -64,13 +64,6 @@ end = struct
   (* Interference Graph Generation via Live-Out *)
   fun interferenceGraph (Flow.FGRAPH { control, def, use, isMove }) =
     let
-
-      (* Store move nodes *)
-      val moves =
-        ref []
-
-
-
       (* Update the In & Out LiveMaps for a single iteration of a Node *)
       fun updateInMap node inMap outMap =
         let
@@ -168,6 +161,9 @@ end = struct
         | SOME (_, temp) =>
             temp
 
+      (* Store move nodes *)
+      val moves =
+        ref []
 
       (* Build the Interfence Graph *)
       fun buildGraph flowNodes =
@@ -179,18 +175,26 @@ end = struct
               val (_, fromOut) =
                 forceLook (FT.look (outMap, node))
             in
-              List.map
-                ( fn d =>
-                  List.map
-                  ( fn out =>
-                    Graph.mk_edge
-                      { from = getNodeFromTemp d
-                      , to = getNodeFromTemp out
-                      }
+              ( List.map
+                  ( fn d =>
+                    List.map
+                    ( fn out =>
+                      Graph.mk_edge
+                        { from = getNodeFromTemp d
+                        , to = getNodeFromTemp out
+                        }
+                    )
+                    fromOut
                   )
-                  fromOut
-                )
-                fromDef
+                  fromDef
+              ; if forceLook (Graph.Table.look (isMove, node)) then
+                  moves := 
+                    ( getNodeFromTemp (List.hd fromDef)
+                    , getNodeFromTemp (List.hd fromOut)) 
+                    :: !moves
+                else 
+                  ()
+              )
             end
         in
           List.map addEdges flowNodes
