@@ -138,5 +138,12 @@ instructions falling through. If a jump label has not yet been processed, the
 label and source node are added to a queue that is used to generate the
 skipped edges after all instructions have had nodes created.
 
+The interference graph is also created in two steps. First we create `in`
+and `out` liveness sets for each node in the flow graph, mapping nodes to the
+temporaries live at that node. The `in` set is only used to help us generate
+the `out` set. After the `out` sets are generated, we use them to generate the
+interference graph. For each defined temporary in a node, we add interference
+edges to each temporary live out of that node.
+
 
 [assembly-guide]: https://www.cs.virginia.edu/~evans/cs216/guides/x86.html

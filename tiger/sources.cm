@@ -8,6 +8,7 @@ Library
     structure Semant
     structure Graph
     structure MakeGraph
+    structure Liveness
     structure Printtree
     structure PrintAbsyn
 is
@@ -35,6 +36,7 @@ is
     canon.sml
     flow.sml
     findescape.sml
+    liveness.sml
     makegraph.sml
     pentiumframe.sml
     pentiumgen.sml
