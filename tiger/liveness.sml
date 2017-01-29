@@ -188,11 +188,11 @@ end = struct
                   )
                   fromDef
               ; if forceLook (Graph.Table.look (isMove, node)) then
-                  moves := 
+                  moves :=
                     ( getNodeFromTemp (List.hd fromDef)
-                    , getNodeFromTemp (List.hd fromOut)) 
+                    , getNodeFromTemp (List.hd fromOut))
                     :: !moves
-                else 
+                else
                   ()
               )
             end
@@ -213,5 +213,14 @@ end = struct
       )
     end
 
-  fun show _ = ()
+  fun show (stream, IGRAPH { graph, ... }) =
+    List.app
+      ( fn n =>
+        TextIO.output
+          ( stream
+          , Graph.nodename n ^ " - " ^
+            String.concatWith ", " (List.map Graph.nodename (Graph.adj n))
+          )
+      )
+      (Graph.nodes graph)
 end
