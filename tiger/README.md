@@ -126,4 +126,17 @@ architecture, via the `PentiumGen` structure. [UVA's x86 Assembly
 Guide][assembly-guide] was used as a register/instruction reference.
 
 
+# Liveness Analysis
+
+Liveness analysis is done in two parts, first a flow graph is created, then an
+interference graph is created.
+
+The flow graph is created in two steps. Starting from the end of the
+instruction list, all nodes are created for each `Assem.instr` along with
+edges for jumps to labels that have already been processed & edges for
+instructions falling through. If a jump label has not yet been processed, the
+label and source node are added to a queue that is used to generate the
+skipped edges after all instructions have had nodes created.
+
+
 [assembly-guide]: https://www.cs.virginia.edu/~evans/cs216/guides/x86.html

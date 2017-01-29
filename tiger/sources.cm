@@ -6,6 +6,8 @@ Library
     structure PentiumGen
     structure Translate
     structure Semant
+    structure Graph
+    structure MakeGraph
     structure Printtree
     structure PrintAbsyn
 is
@@ -14,6 +16,8 @@ is
     assem.sml
     env.sml
     errormsg.sml
+    graph.sig
+    graph.sml
     parse.sml
     prabsyn.sml
     printtree.sml
@@ -29,7 +33,9 @@ is
     frame.sig
 
     canon.sml
+    flow.sml
     findescape.sml
+    makegraph.sml
     pentiumframe.sml
     pentiumgen.sml
     semant.sml
