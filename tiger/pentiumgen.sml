@@ -78,6 +78,11 @@ structure PentiumGen : CODEGEN = struct
             (munchExp e; ())
         | T.LABEL l =>
             emit (A.LABEL { assem = (Symbol.name l ^ ": "), lab = l })
+        | T.MOVE (T.TEMP d, T.TEMP s) =>
+            emit (A.MOVE
+              { assem = "MOV `d0, `s0"
+              , src = s, dst = d
+              })
         | T.MOVE (T.TEMP d, T.MEM (T.BINOP (T.PLUS, T.TEMP s, T.CONST c))) =>
             emit (A.OPER
               { assem = "MOV `d0, [`s0" ^ plusMinusInt c ^ "]\n"
