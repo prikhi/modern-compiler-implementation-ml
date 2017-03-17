@@ -1,6 +1,7 @@
 signature TEMP =
 sig
   eqtype temp
+  val eq : temp -> temp -> bool
   val newtemp : unit -> temp
   structure Table : TABLE sharing type Table.key = temp
   val makestring: temp -> string

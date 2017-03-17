@@ -22,6 +22,8 @@ struct
 
   type node = graph * node'
   fun eq((_,a),(_,b)) = a=b
+  fun edgeEq ((n1, n2), (m1, m2)) =
+    eq (n1, m1) andalso eq (n2, m2)
 
   fun augment (g: graph) (n: node') : node = (g,n)
 

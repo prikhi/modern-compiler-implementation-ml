@@ -304,3 +304,5 @@ structure PentiumGen : CODEGEN = struct
       List.rev (!instructionList)
     end
 end
+
+structure CodeGen : CODEGEN = PentiumGen

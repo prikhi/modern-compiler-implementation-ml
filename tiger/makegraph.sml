@@ -3,12 +3,12 @@ structure MakeGraph : sig
 end = struct
   fun instrsToGraph instrs =
     let
-      val initial = 
-        Flow.FGRAPH 
+      val initial =
+        Flow.FGRAPH
           { control = Graph.newGraph ()
           , def = Graph.Table.empty
           , use = Graph.Table.empty
-          , isMove = Graph.Table.empty 
+          , isMove = Graph.Table.empty
           }
 
       val nodes = List.map (fn _ => Flow.Graph.newNode )
@@ -18,7 +18,7 @@ end = struct
       (* (toLabel, fromNode) list ref *)
       val delayedLabelEdges = ref []
 
-      fun mapEdge from = 
+      fun mapEdge from =
         Option.map (fn to => Flow.Graph.mk_edge { from = from, to = to })
 
       fun addOrDelayLabelEdge from toLabel =
@@ -29,7 +29,7 @@ end = struct
             Flow.Graph.mk_edge { from = from, to = labelNode }
 
       fun reducer (instr, (fallThrough, Flow.FGRAPH { control, def, use, isMove })) =
-        let 
+        let
           val node =
             Flow.Graph.newNode control
         in
@@ -37,7 +37,7 @@ end = struct
             Assem.MOVE { assem, dst, src } =>
               ( mapEdge node fallThrough
               ; ( SOME node
-                , Flow.FGRAPH 
+                , Flow.FGRAPH
                   { control = control
                   , def = Graph.Table.enter (def, node, [dst])
                   , use = Graph.Table.enter (use, node, [src])
@@ -80,7 +80,7 @@ end = struct
 
       fun addMissingLabelEdges _ =
         let
-          fun addEdge (toLabel, fromNode) = 
+          fun addEdge (toLabel, fromNode) =
             case List.find (fn (label, _) => toLabel = label) (!labelToNode) of
               NONE =>
                 ()

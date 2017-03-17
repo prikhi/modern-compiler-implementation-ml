@@ -51,6 +51,8 @@ structure PentiumFrame : FRAME = struct
       , ("EDX", EDX)
       ]
 
+  val registers = [ "EBP", "ESP", "ESI", "EDI", "EAX", "EBX", "ECX", "EDX" ]
+
 
   val specialRegs = [ EBP, ESP ]
   val argRegs = []

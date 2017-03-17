@@ -3,6 +3,7 @@ structure Temp : TEMP =
 struct
     type temp = int
     val temps = ref 100
+    fun eq a b = a = b
     fun newtemp() = let val t = !temps in temps := t+1; t end
 
     structure Table = IntMapTable(type key = int

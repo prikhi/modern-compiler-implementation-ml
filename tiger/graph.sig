@@ -8,6 +8,7 @@ sig
     val pred: node -> node list
     val adj: node -> node list   (* succ+pred *)
     val eq: node*node -> bool
+    val edgeEq : (node * node) * (node * node) -> bool
 
     val newGraph: unit -> graph
     val newNode : graph -> node

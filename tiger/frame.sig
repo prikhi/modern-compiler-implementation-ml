@@ -13,6 +13,8 @@ signature FRAME = sig
 
   val tempMap : register Temp.Table.table
 
+  val registers : register list
+
   val specialRegs : Temp.temp list
   val argRegs : Temp.temp list
   val calleeSaves : Temp.temp list

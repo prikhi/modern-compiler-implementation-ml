@@ -1,16 +1,24 @@
 Library
+
     structure Main
+
     structure Absyn
+    structure Printtree
+    structure PrintAbsyn
+
+    structure Color
+    structure Graph
+    structure GraphUtils
+    structure ListUtils
+    structure Liveness
+    structure MakeGraph
     structure Parse
     structure PentiumFrame
     structure PentiumGen
-    structure Translate
+    structure RegAlloc
     structure Semant
-    structure Graph
-    structure MakeGraph
-    structure Liveness
-    structure Printtree
-    structure PrintAbsyn
+    structure Translate
+
 is
 
     absyn.sml
@@ -34,16 +42,20 @@ is
     frame.sig
 
     canon.sml
+    color.sml
     flow.sml
     findescape.sml
+    intset.sml
     liveness.sml
     makegraph.sml
+    regalloc.sml
     pentiumframe.sml
     pentiumgen.sml
     semant.sml
     tiger.grm
     tiger.lex
     translate.sml
+    utils.sml
 
     main.sml
 
